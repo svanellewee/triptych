@@ -1,0 +1,9 @@
+[package]
+name = "triptych"
+version = "0.1.0"
+authors = ["Stephan van Ellewee <stephan.van.ellewee@gmail.com>"]
+
+[dependencies.rusqlite]
+version = "0.11.0"
+features = ["bundled"]
+
