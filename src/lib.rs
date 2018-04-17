@@ -3,9 +3,10 @@ use rusqlite::Connection;
 use std::path::{Path};
 use std::fmt;
 
+#[macro_use]
 extern crate serde_json;
 
-use self::serde_json::Value;
+use self::serde_json::{Value};
 
 #[derive(Debug)]
 struct Node {
@@ -65,6 +66,7 @@ struct Triple {
    object_id: i64,
 }
 
+
 impl fmt::Display for Triple {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f,
@@ -90,6 +92,27 @@ impl Triple {
                 println!("Error inserting Triple {:?}", issue);
                 Err(issue)
             }
+        }
+    }
+
+    fn get(conn: &Connection, id: i64) -> Option<Triple> {
+        let mut statement = conn.prepare("
+                        SELECT id,
+                               subject_id,
+                               predicate_id,
+                               object_id
+                        FROM triple
+                        WHERE id = :id").unwrap();
+        let mut rows = statement.query_named(&[(":id", &id)]).unwrap();
+        let rowResult = rows.next().unwrap();
+        match rowResult {
+            Ok(rowResult) => Some(Triple{
+                id: rowResult.get(0),
+                subject_id: rowResult.get(1),
+                predicate_id: rowResult.get(2),
+                object_id: rowResult.get(3),
+            }),
+            Err(_) => None,
         }
     }
 }
@@ -157,8 +180,11 @@ mod tests {
             Err(_) => true,
         };
         assert_eq!(failed_state, true);
-        let json = r#"{"foo": 13, "bar": "baz"}"#;
-        let data: serde_json::Value = serde_json::from_str(json).unwrap();
+        //let json = r#"{"foo": 13, "bar": "baz"}"#;
+        //let data: serde_json::Value = serde_json::from_str(json).unwrap()
+        let node_description = json!({
+            "name": "some test name in json",
+        });
     }
     
     #[test]
@@ -174,6 +200,12 @@ mod tests {
         let node3 = Node::get(&conn, 3).unwrap();
         assert_eq!("Boris the bullet dodger", &node1.name);     
         assert_eq!("Brick Top", &node2.name);
-        println!("{}", Triple::new(&conn, &node1, &node3, &node2).unwrap());
+        let triple = Triple::new(&conn, &node1, &node3, &node2).unwrap();
+        println!("{}", triple);
+        let get_triple = Triple::get(&conn, 1).unwrap();
+        assert_eq!(triple.id, get_triple.id);
+        assert_eq!(triple.object_id, get_triple.object_id);
+        assert_eq!(triple.subject_id, get_triple.subject_id);
+        assert_eq!(triple.predicate_id, get_triple.predicate_id);
     }
 }
