@@ -3,49 +3,52 @@ use rusqlite::Connection;
 use std::path::{Path};
 use std::fmt;
 
+extern crate serde_json;
+
+use self::serde_json::Value;
 
 #[derive(Debug)]
-struct Entity {
+struct Node {
   id: i64,
   name: String,
 }
 
-impl fmt::Display for Entity {
+impl fmt::Display for Node {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "entity({}): {}", self.id, self.name)
+        write!(f, "node({}): {}", self.id, self.name)
     }
 }
 
-impl Entity {
-  fn new(conn: &Connection, name: &str) -> Result<Entity, rusqlite::Error> {
+impl Node {
+  fn new(conn: &Connection, name: &str) -> Result<Node, rusqlite::Error> {
       let result = conn.execute("
-                   INSERT INTO entity (name)
+                   INSERT INTO node (name)
                    VALUES (?1)",
                    &[&name.to_string()]);
       match result {
           Ok(_) => {
-              Ok(Entity {
+              Ok(Node {
                   id: conn.last_insert_rowid(),
                   name: name.to_string(),
               })
           },
           Err(issue) => {
-              println!("Error inserting Entity {} {:?}", name.to_string(), issue);
+              println!("Error inserting Node {} {:?}", name.to_string(), issue);
               Err(issue)
           },
       }
     
   }
 
-  fn get(conn: &Connection, id: i64) -> Option<Entity> {
+  fn get(conn: &Connection, id: i64) -> Option<Node> {
     let mut statement = conn.prepare("
                         SELECT id, name
-                        FROM entity
+                        FROM node
                         WHERE id = :id").unwrap();
     let mut rows = statement.query_named(&[(":id", &id)]).unwrap();
     let rowResult = rows.next().unwrap(); // UGLY! fix me!
     match rowResult {
-        Ok(rowResult) => Some(Entity{
+        Ok(rowResult) => Some(Node{
             id: rowResult.get(0),
             name: rowResult.get(1),
         }),
@@ -58,7 +61,7 @@ impl Entity {
 struct Triple {
    id: i64,
    subject_id: i64,
-   predicate: String,
+   predicate_id: i64,
    object_id: i64,
 }
 
@@ -66,21 +69,21 @@ impl fmt::Display for Triple {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f,
                "triple({}): ({} -[{}]-> {})",
-               self.id, self.subject_id, self.predicate, self.object_id)
+               self.id, self.subject_id, self.predicate_id, self.object_id)
     }
 }
 
 impl Triple {
-    fn new(conn: &Connection, subject: &Entity, predicate: &str, object: &Entity) -> Result<Triple, rusqlite::Error> {
+    fn new(conn: &Connection, subject: &Node, predicate: &Node, object: &Node) -> Result<Triple, rusqlite::Error> {
         let result = conn.execute("
-                     INSERT INTO triple (subject_id, predicate, object_id)
+                     INSERT INTO triple (subject_id, predicate_id, object_id)
                      VALUES (?1, ?2, ?3)",
-                     &[&subject.id, &predicate, &object.id]);
+                     &[&subject.id, &predicate.id, &object.id]);
         match result {
             Ok(_) => Ok(Triple {
                 id: conn.last_insert_rowid(),
                 subject_id: subject.id,
-                predicate: predicate.to_string(),
+                predicate_id: predicate.id,
                 object_id: object.id 
             }),
             Err(issue) => { 
@@ -97,9 +100,10 @@ fn build_database(location: Option<&'static str>) -> Result<Connection, rusqlite
         None => Connection::open_in_memory().unwrap(),
     };
     
-   let result = conn.execute("CREATE TABLE IF NOT EXISTS entity (
+   let result = conn.execute("CREATE TABLE IF NOT EXISTS node (
        id INTEGER PRIMARY KEY AUTOINCREMENT,
        name VARCHAR,
+       properties JSON,
        CONSTRAINT unique_name UNIQUE(name)
     )", &[]);
 
@@ -114,12 +118,13 @@ fn build_database(location: Option<&'static str>) -> Result<Connection, rusqlite
     
     let result = conn.execute("CREATE TABLE IF NOT EXISTS triple(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        subject_id INTEGER,
-        predicate VARCHAR,
-        object_id INTEGER,
-        FOREIGN KEY(subject_id) REFERENCES entity(id),
-        FOREIGN KEY(object_id) REFERENCES entity(id),
-        CONSTRAINT yadda UNIQUE (subject_id, predicate, object_id)
+        subject_id INTEGER NOT NULL,
+        predicate_id INTEGER NOT NULL,
+        object_id INTEGER NOT NULL,
+        FOREIGN KEY(subject_id) REFERENCES node(id),
+        FOREIGN KEY(predicate_id) REFERENCES node(id),
+        FOREIGN KEY(object_id) REFERENCES node(id),
+        CONSTRAINT yadda UNIQUE (subject_id, predicate_id, object_id)
     )", &[]);
     match result {
        Ok(value) => println!("seems ok"),
@@ -128,26 +133,6 @@ fn build_database(location: Option<&'static str>) -> Result<Connection, rusqlite
 
    Ok(conn)
 }
-
-/*fn main() {
-    println!("Hello, world!");
-    let mut conn = build_database("/tmp/yadda.db").unwrap();
-    let stephan = Entity::new(&conn, "Stephan").unwrap();
-    let joe = Entity::new(&conn, "Joe").unwrap();
-    let color_red = Entity::new(&conn, "Red").unwrap();
-    println!("{}..", stephan);
-    println!("{}..", joe);
-    println!("{}..", color_red);
-    let stephan_knows_joe = Triple::new(&conn,
-                                        &stephan,
-                                        "knows",
-                                        &joe).unwrap();
-    println!("{}", stephan_knows_joe);
-    let stephan_has_red_hair = Triple::new(&conn, &stephan, "haircolor", &color_red).unwrap();
-    println!("{}", stephan_has_red_hair);
-    conn.close();
-}*/
-
 
 
 #[cfg(test)]
@@ -160,32 +145,35 @@ mod tests {
     }
 
     #[test]
-    fn entity_make() {
+    fn node_make() {
         assert_eq!(true, true);
         let mut conn = build_database(None).unwrap();
-        let entity1 = Entity::new(&conn, "test entity").unwrap();
-        let entity2 = Entity::new(&conn, "test entity the second").unwrap();
-        assert_eq!(entity1.id, 1);
-        assert_eq!(entity2.id, 2);
-        let failed_state = match Entity::new(&conn, "test entity") {
+        let node1 = Node::new(&conn, "test node").unwrap();
+        let node2 = Node::new(&conn, "test node the second").unwrap();
+        assert_eq!(node1.id, 1);
+        assert_eq!(node2.id, 2);
+        let failed_state = match Node::new(&conn, "test node") {
             Ok(result) => false,
             Err(_) => true,
         };
         assert_eq!(failed_state, true);
+        let json = r#"{"foo": 13, "bar": "baz"}"#;
+        let data: serde_json::Value = serde_json::from_str(json).unwrap();
     }
     
     #[test]
     fn triple_make() {
         let mut conn = build_database(None).unwrap();
         conn.execute("
-        INSERT INTO entity (name)
+        INSERT INTO node (name)
         VALUES 
-        ('Boris the bullet dodger'),('Brick Top');
+        ('Boris the bullet dodger'),('Brick Top'),('Knows');
         ", &[]);
-        let entity1 = Entity::get(&conn, 1).unwrap();
-        let entity2 = Entity::get(&conn, 2).unwrap();
-        assert_eq!("Boris the bullet dodger", &entity1.name);     
-        assert_eq!("Brick Top", &entity2.name);
-        println!("{}", Triple::new(&conn, &entity1, "knows", &entity2).unwrap());
+        let node1 = Node::get(&conn, 1).unwrap();
+        let node2 = Node::get(&conn, 2).unwrap();
+        let node3 = Node::get(&conn, 3).unwrap();
+        assert_eq!("Boris the bullet dodger", &node1.name);     
+        assert_eq!("Brick Top", &node2.name);
+        println!("{}", Triple::new(&conn, &node1, &node3, &node2).unwrap());
     }
 }
