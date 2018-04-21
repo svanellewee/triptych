@@ -2,15 +2,9 @@
 name = "triptych"
 version = "0.1.0"
 authors = ["Stephan van Ellewee <stephan.van.ellewee@gmail.com>"]
-[dependencies]
-serde = "1.0.38"
 
-# Support for #[derive(Serialize, Deserialize)]. Required if you want Serde
-# to work for structs and enums defined in your crate.
-serde_derive = "1.0"
-serde_json = "1.0.14"
 
 [dependencies.rusqlite]
-version = "0.11.0"
-features = ["bundled"]
+version = "0.13.0"
+features = ["bundled","serde_json"]
 

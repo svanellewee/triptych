@@ -2,16 +2,13 @@ extern crate rusqlite;
 use rusqlite::Connection;
 use std::path::{Path};
 use std::fmt;
-
-#[macro_use]
-extern crate serde_json;
-
-use self::serde_json::{Value};
+use rusqlite::types::Value;
 
 #[derive(Debug)]
 struct Node {
   id: i64,
   name: String,
+  properties: String,
 }
 
 impl fmt::Display for Node {
@@ -21,16 +18,17 @@ impl fmt::Display for Node {
 }
 
 impl Node {
-  fn new(conn: &Connection, name: &str) -> Result<Node, rusqlite::Error> {
+  fn new(conn: &Connection, name: &str, properties: &str) -> Result<Node, rusqlite::Error> {
       let result = conn.execute("
-                   INSERT INTO node (name)
-                   VALUES (?1)",
-                   &[&name.to_string()]);
+                   INSERT INTO node (name, properties)
+                   VALUES (?1, ?2)",
+                   &[&name.to_string(), &properties.to_string()]);
       match result {
           Ok(_) => {
               Ok(Node {
                   id: conn.last_insert_rowid(),
                   name: name.to_string(),
+                  properties: properties.to_string(),
               })
           },
           Err(issue) => {
@@ -43,7 +41,7 @@ impl Node {
 
   fn get(conn: &Connection, id: i64) -> Option<Node> {
     let mut statement = conn.prepare("
-                        SELECT id, name
+                        SELECT id, name, properties
                         FROM node
                         WHERE id = :id").unwrap();
     let mut rows = statement.query_named(&[(":id", &id)]).unwrap();
@@ -52,6 +50,7 @@ impl Node {
         Ok(rowResult) => Some(Node{
             id: rowResult.get(0),
             name: rowResult.get(1),
+            properties: rowResult.get(2),
         }),
         Err(_) => None,
     }
@@ -162,38 +161,29 @@ fn build_database(location: Option<&'static str>) -> Result<Connection, rusqlite
 mod tests {
     use super::*;
 
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
 
     #[test]
     fn node_make() {
         assert_eq!(true, true);
         let mut conn = build_database(None).unwrap();
-        let node1 = Node::new(&conn, "test node").unwrap();
-        let node2 = Node::new(&conn, "test node the second").unwrap();
+        let node1 = Node::new(&conn, "test node", "{}").unwrap();
+        let node2 = Node::new(&conn, "test node the second", "{}").unwrap();
         assert_eq!(node1.id, 1);
         assert_eq!(node2.id, 2);
-        let failed_state = match Node::new(&conn, "test node") {
+        let failed_state = match Node::new(&conn, "test node", "{}") {
             Ok(result) => false,
             Err(_) => true,
         };
         assert_eq!(failed_state, true);
-        //let json = r#"{"foo": 13, "bar": "baz"}"#;
-        //let data: serde_json::Value = serde_json::from_str(json).unwrap()
-        let node_description = json!({
-            "name": "some test name in json",
-        });
     }
     
     #[test]
     fn triple_make() {
         let mut conn = build_database(None).unwrap();
         conn.execute("
-        INSERT INTO node (name)
+        INSERT INTO node (name, properties)
         VALUES 
-        ('Boris the bullet dodger'),('Brick Top'),('Knows');
+        ('Boris the bullet dodger','{}'),('Brick Top', '{\"hello\" : [1,2,\"world\"]}'),('Knows', '{}');
         ", &[]);
         let node1 = Node::get(&conn, 1).unwrap();
         let node2 = Node::get(&conn, 2).unwrap();
