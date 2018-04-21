@@ -2,37 +2,35 @@ extern crate rusqlite;
 use rusqlite::Connection;
 use std::path::{Path};
 use std::fmt;
-use rusqlite::types::Value;
+
 
 #[derive(Debug)]
 struct Node {
   id: i64,
-  name: String,
   properties: String,
 }
 
 impl fmt::Display for Node {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "node({}): {}", self.id, self.name)
+        write!(f, "node({}): {}", self.id, self.properties)
     }
 }
 
 impl Node {
-  fn new(conn: &Connection, name: &str, properties: &str) -> Result<Node, rusqlite::Error> {
+  fn new(conn: &Connection, properties: &str) -> Result<Node, rusqlite::Error> {
       let result = conn.execute("
-                   INSERT INTO node (name, properties)
-                   VALUES (?1, ?2)",
-                   &[&name.to_string(), &properties.to_string()]);
+                   INSERT INTO node (properties)
+                   VALUES (?1)",
+                   &[&properties.to_string()]);
       match result {
           Ok(_) => {
               Ok(Node {
                   id: conn.last_insert_rowid(),
-                  name: name.to_string(),
                   properties: properties.to_string(),
               })
           },
           Err(issue) => {
-              println!("Error inserting Node {} {:?}", name.to_string(), issue);
+              println!("Error inserting Node {} {:?}", properties.to_string(), issue);
               Err(issue)
           },
       }
@@ -41,7 +39,7 @@ impl Node {
 
   fn get(conn: &Connection, id: i64) -> Option<Node> {
     let mut statement = conn.prepare("
-                        SELECT id, name, properties
+                        SELECT id, properties
                         FROM node
                         WHERE id = :id").unwrap();
     let mut rows = statement.query_named(&[(":id", &id)]).unwrap();
@@ -49,8 +47,7 @@ impl Node {
     match rowResult {
         Ok(rowResult) => Some(Node{
             id: rowResult.get(0),
-            name: rowResult.get(1),
-            properties: rowResult.get(2),
+            properties: rowResult.get(1),
         }),
         Err(_) => None,
     }
@@ -124,9 +121,7 @@ fn build_database(location: Option<&'static str>) -> Result<Connection, rusqlite
     
    let result = conn.execute("CREATE TABLE IF NOT EXISTS node (
        id INTEGER PRIMARY KEY AUTOINCREMENT,
-       name VARCHAR,
-       properties JSON,
-       CONSTRAINT unique_name UNIQUE(name)
+       properties VARCHAR
     )", &[]);
 
     match conn.execute("PRAGMA foreign_keys = 1", &[]) {
@@ -166,30 +161,28 @@ mod tests {
     fn node_make() {
         assert_eq!(true, true);
         let mut conn = build_database(None).unwrap();
-        let node1 = Node::new(&conn, "test node", "{}").unwrap();
-        let node2 = Node::new(&conn, "test node the second", "{}").unwrap();
+        let node1 = Node::new(&conn, "{\"name\": \"test node\"}").unwrap();
+        let node2 = Node::new(&conn, "{\"name\": \"test node the second\"}",).unwrap();
         assert_eq!(node1.id, 1);
         assert_eq!(node2.id, 2);
-        let failed_state = match Node::new(&conn, "test node", "{}") {
-            Ok(result) => false,
-            Err(_) => true,
-        };
-        assert_eq!(failed_state, true);
     }
     
     #[test]
     fn triple_make() {
         let mut conn = build_database(None).unwrap();
         conn.execute("
-        INSERT INTO node (name, properties)
+        INSERT INTO node (properties)
         VALUES 
-        ('Boris the bullet dodger','{}'),('Brick Top', '{\"hello\" : [1,2,\"world\"]}'),('Knows', '{}');
+        ('{\"name\": \"Boris the\"}'),
+        ('{\"name\": \"Brick Top\"}'),
+        ('{\"name\": \"Knows\"}')
         ", &[]);
         let node1 = Node::get(&conn, 1).unwrap();
         let node2 = Node::get(&conn, 2).unwrap();
         let node3 = Node::get(&conn, 3).unwrap();
-        assert_eq!("Boris the bullet dodger", &node1.name);     
-        assert_eq!("Brick Top", &node2.name);
+        println!("{}", node1);
+        assert!(node1.properties.contains("Boris the"));     
+        assert!(node2.properties.contains("Brick Top"));
         let triple = Triple::new(&conn, &node1, &node3, &node2).unwrap();
         println!("{}", triple);
         let get_triple = Triple::get(&conn, 1).unwrap();
