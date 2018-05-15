@@ -1,119 +1,160 @@
+#[macro_use]
+extern crate serde_json;
+
 extern crate rusqlite;
-use rusqlite::Connection;
+
+use serde_json::{Value};
+use rusqlite::{Connection};
 use std::path::{Path};
-use std::fmt;
 
 
 #[derive(Debug)]
 struct Node {
-  id: i64,
-  properties: String,
-}
-
-impl fmt::Display for Node {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "node({}): {}", self.id, self.properties)
-    }
+   id: Option<u32>,
+   data: Value,
 }
 
 impl Node {
-  fn new(conn: &Connection, properties: &str) -> Result<Node, rusqlite::Error> {
-      let result = conn.execute("
-                   INSERT INTO node (properties)
-                   VALUES (?1)",
-                   &[&properties.to_string()]);
-      match result {
-          Ok(_) => {
-              Ok(Node {
-                  id: conn.last_insert_rowid(),
-                  properties: properties.to_string(),
-              })
-          },
-          Err(issue) => {
-              println!("Error inserting Node {} {:?}", properties.to_string(), issue);
-              Err(issue)
-          },
-      }
-    
-  }
+   pub fn create(db: &Connection, data: Value) -> Node {
+     db.execute("
+     CREATE TABLE IF NOT EXISTS node (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       data BLOB)", &[]).unwrap();
 
-  fn get(conn: &Connection, id: i64) -> Option<Node> {
-    let mut statement = conn.prepare("
-                        SELECT id, properties
-                        FROM node
-                        WHERE id = :id").unwrap();
-    let mut rows = statement.query_named(&[(":id", &id)]).unwrap();
-    let rowResult = rows.next().unwrap(); // UGLY! fix me!
-    match rowResult {
-        Ok(rowResult) => Some(Node{
-            id: rowResult.get(0),
-            properties: rowResult.get(1),
-        }),
-        Err(_) => None,
-    }
-  }
+     db.execute("
+     INSERT INTO node (data)
+      VALUES (?)", &[&data]);
+     
+     Node {
+         id: Some(db.last_insert_rowid() as u32),
+         data: data
+     }
+   }
+   pub fn get(db: &Connection, id: u32) -> Option<Node> {
+      let mut stmnt = db.prepare("SELECT id, data
+                                  FROM node
+                                  WHERE id = :id")
+          .unwrap();
+      let mut rows = stmnt.query_named(&[(":id", &id)])
+          .unwrap();
+      let row_result = rows.next()
+          .unwrap();
+      match row_result {
+          Ok(row_result) => Some(Node{
+              id: Some(row_result.get(0)),
+              data: row_result.get(1),
+          }),
+          Err(_) => None,
+      }
+   }
 }
 
 #[derive(Debug)]
 struct Triple {
-   id: i64,
-   subject_id: i64,
-   predicate_id: i64,
-   object_id: i64,
-}
-
-
-impl fmt::Display for Triple {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f,
-               "triple({}): ({} -[{}]-> {})",
-               self.id, self.subject_id, self.predicate_id, self.object_id)
-    }
+  id: Option<u32>,
+  subject_id: u32,
+  predicate_id: u32,
+  object_id: u32,
 }
 
 impl Triple {
-    fn new(conn: &Connection, subject: &Node, predicate: &Node, object: &Node) -> Result<Triple, rusqlite::Error> {
-        let result = conn.execute("
-                     INSERT INTO triple (subject_id, predicate_id, object_id)
-                     VALUES (?1, ?2, ?3)",
-                     &[&subject.id, &predicate.id, &object.id]);
-        match result {
-            Ok(_) => Ok(Triple {
-                id: conn.last_insert_rowid(),
-                subject_id: subject.id,
-                predicate_id: predicate.id,
-                object_id: object.id 
-            }),
-            Err(issue) => { 
-                println!("Error inserting Triple {:?}", issue);
-                Err(issue)
-            }
-        }
-    }
+  pub fn create(db: &Connection,
+                subject_id: u32,
+                predicate_id: u32,
+                object_id: u32) -> Triple {
+     db.execute("
+     CREATE TABLE IF NOT EXISTS triple (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       subject_id INTEGER NOT NULL,
+       predicate_id INTEGER NOT NULL,
+       object_id INTEGER NOT NULL,
+       FOREIGN KEY(subject_id) REFERENCES node(id),
+       FOREIGN KEY(predicate_id) REFERENCES node(id),
+       FOREIGN KEY(object_id) REFERENCES node(id),
+       CONSTRAINT only_unique_triples UNIQUE (subject_id, predicate_id, object_id))", &[]).unwrap();
 
-    fn get(conn: &Connection, id: i64) -> Option<Triple> {
-        let mut statement = conn.prepare("
-                        SELECT id,
-                               subject_id,
-                               predicate_id,
-                               object_id
-                        FROM triple
-                        WHERE id = :id").unwrap();
-        let mut rows = statement.query_named(&[(":id", &id)]).unwrap();
-        let rowResult = rows.next().unwrap();
-        match rowResult {
-            Ok(rowResult) => Some(Triple{
-                id: rowResult.get(0),
-                subject_id: rowResult.get(1),
-                predicate_id: rowResult.get(2),
-                object_id: rowResult.get(3),
-            }),
-            Err(_) => None,
-        }
+     db.execute("
+        INSERT INTO triple (subject_id, predicate_id, object_id)
+        VALUES (?, ?, ?)", &[&subject_id, &predicate_id, &object_id]);
+        Triple {
+                id: Some(db.last_insert_rowid() as u32),
+                subject_id: subject_id,
+                predicate_id: predicate_id,
+                object_id: object_id,
+         }
+     }  
+
+  pub fn get(db: &Connection, id: u32) -> Option<Triple> {
+      let mut stmnt = db.prepare("SELECT id, subject_id, predicate_id, object_id
+                              FROM triple
+                              WHERE id = :id").unwrap();
+      let mut rows = stmnt.query_named(&[(":id", &id)]).unwrap();
+      let row_result = rows.next().unwrap();
+      match row_result {
+          Ok(row_result) => Some(Triple{
+              id: Some(row_result.get(0)),
+              subject_id: row_result.get(1),
+              predicate_id: row_result.get(2),
+              object_id: row_result.get(3),
+          }),
+          Err(_) => None,
+      }
+   }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn node_make() {
+        assert_eq!(true, true);
+        let mut conn = build_database(None).unwrap();
+        let node1 = Node::create(&conn, json!({"name": "test node"}));
+        let node2 = Node::create(&conn, json!({"name": "test node the second"}));
+        assert_eq!(node1.id, Some(1));
+        assert_eq!(node2.id, Some(2));
+    }
+    
+    #[test]
+    fn triple_make() {
+        let mut conn = build_database(None).unwrap();
+        Node::create(&conn, json!({"name": "Boris the"}));
+        Node::create(&conn, json!({"name": "Brick Top"}));
+        Node::create(&conn, json!({"name": "Knows"}));
+        let node1 = Node::get(&conn, 1).unwrap();
+        let node2 = Node::get(&conn, 2).unwrap();
+        let node3 = Node::get(&conn, 3).unwrap();
+        println!("{:?}", node1);
+        assert!(node1.data["name"].to_string().contains("Boris the"));     
+        assert!(node2.data["name"].to_string().contains("Brick Top"));
+
+        let triple = Triple::create(&conn, node1.id.unwrap(), node3.id.unwrap(), node2.id.unwrap());
+        println!("{:?}", triple);
+        let get_triple = Triple::get(&conn, 1).unwrap();
+        assert_eq!(triple.id, get_triple.id);
+        assert_eq!(triple.object_id, get_triple.object_id);
+        assert_eq!(triple.subject_id, get_triple.subject_id);
+        assert_eq!(triple.predicate_id, get_triple.predicate_id); 
     }
 }
 
 fn build_database(location: Option<&'static str>) -> Result<Connection, rusqlite::Error> {
+    let mut conn = match location {
+        Some(location) => Connection::open(Path::new(location)).unwrap(),
+        None => Connection::open_in_memory().unwrap(),
+    };
+    
+    match conn.execute("PRAGMA foreign_keys = 1", &[]) {
+        Err(value) => println!("Not right {:?}", value),
+        _ => {},
+    }
+
+   Ok(conn)
+}
+
+/*fn build_database(location: Option<&'static str>) -> Result<Connection, rusqlite::Error> {
     let mut conn = match location {
         Some(location) => Connection::open(Path::new(location)).unwrap(),
         None => Connection::open_in_memory().unwrap(),
@@ -149,46 +190,6 @@ fn build_database(location: Option<&'static str>) -> Result<Connection, rusqlite
     }
 
    Ok(conn)
-}
+}*/
 
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-
-    #[test]
-    fn node_make() {
-        assert_eq!(true, true);
-        let mut conn = build_database(None).unwrap();
-        let node1 = Node::new(&conn, "{\"name\": \"test node\"}").unwrap();
-        let node2 = Node::new(&conn, "{\"name\": \"test node the second\"}",).unwrap();
-        assert_eq!(node1.id, 1);
-        assert_eq!(node2.id, 2);
-    }
-    
-    #[test]
-    fn triple_make() {
-        let mut conn = build_database(None).unwrap();
-        conn.execute("
-        INSERT INTO node (properties)
-        VALUES 
-        ('{\"name\": \"Boris the\"}'),
-        ('{\"name\": \"Brick Top\"}'),
-        ('{\"name\": \"Knows\"}')
-        ", &[]);
-        let node1 = Node::get(&conn, 1).unwrap();
-        let node2 = Node::get(&conn, 2).unwrap();
-        let node3 = Node::get(&conn, 3).unwrap();
-        println!("{}", node1);
-        assert!(node1.properties.contains("Boris the"));     
-        assert!(node2.properties.contains("Brick Top"));
-        let triple = Triple::new(&conn, &node1, &node3, &node2).unwrap();
-        println!("{}", triple);
-        let get_triple = Triple::get(&conn, 1).unwrap();
-        assert_eq!(triple.id, get_triple.id);
-        assert_eq!(triple.object_id, get_triple.object_id);
-        assert_eq!(triple.subject_id, get_triple.subject_id);
-        assert_eq!(triple.predicate_id, get_triple.predicate_id);
-    }
-}
